@@ -84,4 +84,6 @@ The final data is stored in the following folder structure
 ```
 
 ![rgbImage](images/rgb_0000.png)
-
+![prangeImage](images/prange_0000.png)
+![semanticImage](images/semantic_0000.png)
+![instanceImage](images/labels_0000.png)
