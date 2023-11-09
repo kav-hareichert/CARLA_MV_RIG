@@ -1,26 +1,16 @@
-#!/usr/bin/env python
-
-# Copyright (c) 2020 Computer Vision Center (CVC) at the Universitat Autonoma de
-# Barcelona (UAB).
-#
-# This work is licensed under the terms of the MIT license.
-# For a copy, see <https://opensource.org/licenses/MIT>.
-
-"""Open3D Lidar visuialization example for CARLA"""
-
 import glob
 import os
 import sys
 import argparse
-import time
+
 from datetime import datetime
 import random
 import numpy as np
 from matplotlib import cm
-import open3d as o3d
+
 import json
 import logging
-import cv2
+
 import queue
 import threading
 import copy
@@ -103,9 +93,13 @@ def get_lidar_point(loc, w2s):
 
 def get_all_static_actors(world):
     # get the blueprint library
-    blueprint_library = world.get_blueprint_library()
+    #blueprint_library = world.get_blueprint_library()
     labels = {}
-    vehicle_actors = world.get_environment_objects(carla.CityObjectLabel.Cars)
+    vehicle_actors = world.get_environment_objects(carla.CityObjectLabel.Car)
+    vehicle_actors += world.get_environment_objects(carla.CityObjectLabel.Bicycle)
+    vehicle_actors += world.get_environment_objects(carla.CityObjectLabel.Bus)
+    vehicle_actors += world.get_environment_objects(carla.CityObjectLabel.Truck)
+    vehicle_actors += world.get_environment_objects(carla.CityObjectLabel.Motorcycle)
     for npc in vehicle_actors:
 
         npc_id = npc.id
@@ -149,24 +143,13 @@ def get_all_static_actors(world):
         labels[npc_id] = npc_dict
     return labels
 
-def save_lidar_and_labels(world, frame_id, save_path):
-    # get the blueprint library
-    blueprint_library = world.get_blueprint_library()
-    # make save path dir
-    labels_path = os.path.join(save_path, "labels")
-    # calib_path = os.path.join(save_path, "calib")
-    # w2s = np.array(point_cloud_roof.transform.get_matrix())
-    # meta["world2sensor_roof"] = w2s.tolist()
-    os.makedirs(labels_path, exist_ok=True)
-    #os.makedirs(labels_path) if not os.path.exists(labels_path) else [os.remove(f) for f in glob.glob(labels_path+"/*") if os.path.isfile(f)]
-
-    #os.makedirs(calib_path, exist_ok=True)
+def get_lidar_and_labels(world, static_labels):
 
 
     #json.dump(meta, open(os.path.join(calib_path,'%.6d.json' % frame_id), 'w' ) )
     # first get all actors and assume them as static
-    #labels = get_all_static_actors(world)
-    labels = {}
+    labels = static_labels #get_all_static_actors(world)
+    #labels = {}
     # get all dynamic walkeras and vehicles as actors
     vehicle_actors = world.get_actors().filter('*vehicle.*')
     walker_actors = world.get_actors().filter('*walker.*')
@@ -211,9 +194,9 @@ def save_lidar_and_labels(world, frame_id, save_path):
             for i, bone in enumerate(bones.bone_transforms):
                 boneIndex[bone.name] = {"world": [bone.world.location.x, bone.world.location.y, bone.world.location.z]}
             npc_dict["bones"] = boneIndex
-        if isinstance(npc, carla.Vehicle):
-            bp = blueprint_library.find(npc_type_id)
-            npc_dict["number_of_wheels"] = int(bp.get_attribute('number_of_wheels'))
+        # if isinstance(npc, carla.Vehicle):
+        #     bp = blueprint_library.find(npc_type_id)
+        #     npc_dict["number_of_wheels"] = int(bp.get_attribute('number_of_wheels'))
         npc_dict["motion_state"] = "dynamic"
         npc_dict["velocity"] = [vx,vy,vz]
         npc_dict["acceleration"] = [ax,ay,az]
@@ -225,7 +208,16 @@ def save_lidar_and_labels(world, frame_id, save_path):
         
         npc_dict["verts"] = [[v.x, v.y, v.z] for v in bb.get_world_vertices(npc.get_transform())]
         labels[npc_id] = npc_dict
-        json.dump(labels, open(os.path.join(labels_path,'%.4d.json' % frame_id), 'w' ) )
+    return labels
+
+def save_lidar_and_labels(labels, frame_id, save_path):
+
+    labels_path = os.path.join(save_path, "labels")
+
+    os.makedirs(labels_path, exist_ok=True)
+
+
+    json.dump(labels, open(os.path.join(labels_path,'%.4d.json' % frame_id), 'w' ) )
 
 
 # -------------
@@ -250,6 +242,33 @@ class Sensor:
         self.folder_output = folder_output
         self.ts_tmp = 0
 
+def push_snapshot(snapshot):
+    snapshots.put(snapshot)
+
+class Labels:
+    initial_ts = 0.0
+
+    def __init__(self, world, folder_output):
+        self.sensor_frame_id = 0
+        self.queue = queue.Queue()
+        #self.bp = self.set_attributes(world.get_blueprint_library())
+        self.static_labels = get_all_static_actors(world)
+        self.world = world
+        self.folder_output = folder_output
+        self.world.on_tick(lambda ws: self.queue.put(world))
+    
+    def save(self):
+        while not self.queue.empty():
+            world = self.queue.get()
+            labels = get_lidar_and_labels(world, self.static_labels)
+            save_lidar_and_labels(labels, self.sensor_frame_id, self.folder_output)
+            self.sensor_frame_id += 1
+            
+    def dequeue(self):
+        while not self.queue.empty():
+            data = self.queue.get()
+
+
 class Camera(Sensor):
     def __init__(self, vehicle, world, folder_output, transform, meta):
         Sensor.__init__(self, vehicle, world, folder_output, transform)
@@ -271,8 +290,14 @@ class Camera(Sensor):
         while not self.queue.empty():
             meta = self.meta
             data = self.queue.get()
+            # Todo save world to sensor for every sensor
+            if self.sensor_id == 0:
+                #save_lidar_and_labels(self.world, self.sensor_frame_id, self.folder_output)
+                with open(self.folder_output+"/full_ts_camera.txt", 'a') as file:
+                    file.write(str(self.sensor_frame_id)+" "+str(data.timestamp - Sensor.initial_ts)+"\n")
             if first_call:
                 first_call = False
+                
                 weather =  self.world.get_weather()
                 print("weather", weather)
                 w2s = np.array(data.transform.get_matrix())
@@ -295,11 +320,8 @@ class Camera(Sensor):
                 x = threading.Thread(target=data.save_to_disk, args=(file_path, color_converter))
                 x.start()
                 print("Export : "+file_path)
-                # Todo save world to sensor for every sensor
-                if self.sensor_id == 0:
-                    save_lidar_and_labels(self.world, self.sensor_frame_id, self.folder_output)
-                    with open(self.folder_output+"/full_ts_camera.txt", 'a') as file:
-                        file.write(str(self.sensor_frame_id)+" "+str(data.timestamp - Sensor.initial_ts)+"\n")
+                
+                
                 self.sensor_frame_id += 1
 
     def dequeue(self):
@@ -503,10 +525,10 @@ class Ladybug5:
         for cam in self.list_is_cam:
             cam.save()
 
-        for cam in self.list_ss_cam:
-            cam.save()
-
         for cam in self.list_depth_cam:
+            cam.save()
+            
+        for cam in self.list_ss_cam:
             cam.save()
     
     def dequeue(self):
@@ -514,32 +536,21 @@ class Ladybug5:
             cam.dequeue()
         for cam in self.list_is_cam:
             cam.dequeue()
-        for cam in self.list_ss_cam:
-            cam.dequeue()
+        
         for cam in self.list_depth_cam:
             cam.dequeue()
+        
+        for cam in self.list_ss_cam:
+            cam.dequeue()
 
 
 
 
-def add_open3d_axis(vis):
-    """Add a small 3D axis on Open3D Visualizer"""
-    axis = o3d.geometry.LineSet()
-    axis.points = o3d.utility.Vector3dVector(np.array([
-        [0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0]]))
-    axis.lines = o3d.utility.Vector2iVector(np.array([
-        [0, 1],
-        [0, 2],
-        [0, 3]]))
-    axis.colors = o3d.utility.Vector3dVector(np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0]]))
-    vis.add_geometry(axis)
+## Build World Queue for Metadata and 3D annotations
+snapshots = queue.Queue()
 
+def push_snapshot(snapshot):
+    snapshots.put(snapshot)
 
 def main(arg):
     args = arg
@@ -763,7 +774,6 @@ def main(arg):
         meta["mounting_angle"] = np.array([rotation.pitch, rotation.roll, rotation.yaw]).tolist()
 
         camera_rig = Ladybug5(vehicle, world, arg.save_path, transform, meta)
-
         frame = 0
         dt0 = datetime.now()
         n_ticks = 0
@@ -772,20 +782,26 @@ def main(arg):
             frame_id = world.tick()
             n_ticks += 1
             if (frame_id % args.save_nth_frame == 0) and (n_ticks >= ramp_up_frames):
+                # TODO. somhow there is a shift between 
+                static_labels = get_all_static_actors(world)
+                labels = get_lidar_and_labels(world, static_labels)
+                save_lidar_and_labels(labels, frame, arg.save_path)
                 camera_rig.save()
                 frame += 1
-            else:
-                camera_rig.dequeue()            
                 
+            else:
+                camera_rig.dequeue()        
             if (frame_id % 10 == 0) and (frame_id > 0):
+                tmp_var_ = 1
                 # enable fog and rain in 50% of the cases. Sweep from 10% to 90% if enabled
-                weather = carla.WeatherParameters(
-                cloudiness=np.random.choice([10.0* i for i in range(1,6)]+[0.0* i for i in range(0,9)]),
+                #weather = carla.WeatherParameters(
+                #cloudiness=np.random.choice([10.0* i for i in range(1,6)]+[0.0* i for i in range(0,9)]),
                 #precipitation=np.random.choice([10.0* i for i in range(1,9)]+[0.0* i for i in range(0,8)]),
                 #precipitation_deposits=np.random.choice([10.0* i for i in range(1,9)]+[0.0* i for i in range(0,8)]),
-                sun_altitude_angle=np.random.choice([10.0* i for i in range(3,6)]),
-                sun_azimuth_angle=np.random.choice([10.0* i for i in range(0,36)]))
-                world.set_weather(weather)
+                #sun_altitude_angle=np.random.choice([10.0* i for i in range(3,6)]),
+                #sun_azimuth_angle=np.random.choice([10.0* i for i in range(0,36)]))
+                #world.set_weather(weather)
+                
 
     finally:
         print("destroyer")
@@ -793,8 +809,7 @@ def main(arg):
         traffic_manager.set_synchronous_mode(False)
 
         vehicle.destroy()
-        #bumper_lidar.destroy()
-        #vis.destroy_window()
+
 
 
 if __name__ == "__main__":
@@ -840,39 +855,15 @@ if __name__ == "__main__":
         metavar='PATTERN',
         default='model3',
         help='actor filter (default: "vehicle.*")')
-    argparser.add_argument(
-        '--upper-fov',
-        default=90.0,
-        type=float,
-        help='lidar\'s upper field of view in degrees (default: 15.0)')
-    argparser.add_argument(
-        '--lower-fov',
-        default=-90.0,
-        type=float,
-        help='lidar\'s lower field of view in degrees (default: -25.0)')
-    argparser.add_argument(
-        '--channels',
-        default=1024.0,
-        type=float,
-        help='lidar\'s channel count (default: 64)')
-    argparser.add_argument(
-        '--range',
-        default=250.0,
-        type=float,
-        help='lidar\'s maximum range in meters (default: 100.0)')
-    argparser.add_argument(
-        '--points-per-second',
-        default=2024,
-        type=int,
-        help='lidar\'s points per second (default: 500000)')
+
     argparser.add_argument(
         '--n_frames',
-        default=100,
+        default=10,
         type=int,
         help='number of frames to save (default: 100)')
     argparser.add_argument(
         '--save_nth_frame',
-        default=100,
+        default=10,
         type=int,
         help='frames to be saved (default: 10')
     argparser.add_argument(
@@ -912,19 +903,19 @@ if __name__ == "__main__":
         help='frame rate')
     argparser.add_argument(
         '-save_path',
-        default="/mnt/data1/CARLA_HIGH_RES_LIDAR/Ladybug5_0003",
+        default="/tmp/Ladybug5",
         type=str,
         help='save path')
     argparser.add_argument(
         '-n', '--number-of-vehicles',
         metavar='N',
-        default=60,
+        default=20,
         type=int,
         help='Number of vehicles (default: 30)')
     argparser.add_argument(
         '-w', '--number-of-walkers',
         metavar='W',
-        default=60,
+        default=80,
         type=int,
         help='Number of walkers (default: 10)')
     argparser.add_argument(
