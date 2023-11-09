@@ -29,7 +29,7 @@ The stitching will create an additional folder "equirectangular" which contains 
 
 ## Data
 The final data is stored in the following folder structure
-´´´bash
+```bash
 ├── calib_depth # calibration intrinsics and world2sensor
 ├── calib_is # calibration intrinsics and world2sensor
 ├── calib_rgb # calibration intrinsics and world2sensor
