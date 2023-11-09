@@ -23,7 +23,7 @@ Make sure to set a valid save_path!
 We stitch the panoramas in a postprocessing step.
 For the stitching run:
 ```bash
-python Stitch_CARLA_Panorama.py -data_path "path/to/your/recording
+python Stitch_CARLA_Panorama.py -data_path "path/to/your/recording"
 ```
 The stitching will create an additional folder "equirectangular" which contains the stitched panoramas for RGB, range, semantic segmentation, and instance segmentation.
 
