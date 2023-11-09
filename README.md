@@ -82,8 +82,13 @@ The final data is stored in the following folder structure
     ├── 0000.json
     └── *.json
 ```
-
+Our panoramas come as uint8 RGB: 
 ![rgbImage](images/rgb_0000.png)
+For our range images we use uint16 to store range up to 500m with cm accuracy.
+Keep in mind that we use range and not depth!
 ![prangeImage](images/prange_0000.jpg)
+For the semantic segmentation, we use the classes available in CARLA 9.14 
 ![semanticImage](images/semantic_0000.png)
+For the instance segmentation we use the CARLA color coding. The red channel encodes the instance class and the green and blue channel encode the instance id.
+See https://carla.readthedocs.io/en/latest/tuto_G_instance_segmentation_sensor/ for more details.
 ![instanceImage](images/labels_0000.png)
