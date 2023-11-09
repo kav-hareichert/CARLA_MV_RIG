@@ -82,3 +82,6 @@ The final data is stored in the following folder structure
     ├── 0000.json
     └── *.json
 ```
+
+![rgbImage](images/rgb_0000.png)
+
